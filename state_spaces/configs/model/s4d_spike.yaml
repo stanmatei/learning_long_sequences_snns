@@ -1,6 +1,6 @@
 defaults:
   - base
-  - override layer: standalone
+  - override layer: s4dspike
 
 transposed: false # Actually faster than "true"
 tie_dropout: true
