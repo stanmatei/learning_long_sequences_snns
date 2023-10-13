@@ -4,6 +4,8 @@ import logging
 import os
 import pickle
 from pathlib import Path
+import h5py
+import numpy as np
 
 import torch
 from torch import nn
@@ -401,14 +403,23 @@ class PathFinderDataset(torch.utils.data.Dataset):
                             samples.append((image_path, label))
         self.samples = samples
 
+        self.imgs_data = h5py.File(self.data_dir / diff_level / "imgs.h5")
+        self.imgs_data = self.imgs_data.get(list(self.imgs_data.keys())[0])
+
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
         path, target = self.samples[idx]
         # https://github.com/pytorch/vision/blob/9b29f3f22783112406d9c1a6db47165a297c3942/torchvision/datasets/folder.py#L247
-        with open(self.data_dir / path, "rb") as f:
-            sample = Image.open(f).convert("L")  # Open in grayscale
+        #with open(self.data_dir / path, "rb") as f:
+        #    sample = Image.open(f).convert("L")  # Open in grayscale
+
+        folder = str(path).split("/")[-2]
+        img = str(path).split("/")[-1]
+
+        sample = Image.fromarray(np.array(self.imgs_data.get(folder).get(img))).convert("L")
+
         if self.transform is not None:
             sample = self.transform(sample)
         return sample, target

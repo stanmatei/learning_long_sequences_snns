@@ -1,12 +1,12 @@
 # @package _global_
 defaults:
-  - /pipeline: pathx
+  - /pipeline: pathfinder
   - /model: s4d_funnel
   - override /scheduler: cosine_warmup
 
 scheduler:
-  num_training_steps: 500000 # 50 epochs
-  num_warmup_steps: 10000 # 1 epoch
+  num_training_steps: 500000 # 200 epochs
+  num_warmup_steps: 2500 # 1 epoch
 
 model:
   dropout: 0.
@@ -16,20 +16,23 @@ model:
   norm: batch
   layer:
     d_state: 64
-    lr: 0.0005
-    dt_min: 0.0001
+    lr: 0.001
+    dt_min: 0.001
     dt_max: 0.1
 
+decoder:
+  mode: last
+
 loader:
-  batch_size: 16
+  batch_size: 64
 
 optimizer:
-  lr: 0.0005
-  weight_decay: 0.05
+  lr: 0.004
+  weight_decay: 0.03
 
 trainer:
-  max_epochs: 20
+  max_epochs: 200
 
 train:
   seed: 2222
-  interval: step # For cosine scheduler
+  interval: step

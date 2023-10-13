@@ -19,6 +19,30 @@ from src.models.nn import DropoutNd
 _c2r = torch.view_as_real
 _r2c = torch.view_as_complex
 
+class StochasticStraightThrough(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        ctx.save_for_backward(input)
+        out = torch.bernoulli(input) # Equation (18)
+        return out
+    @staticmethod
+    def backward(ctx, grad_output):
+        input, = ctx.saved_tensors
+        grad_input = grad_output.clone()
+        return grad_input*input # Equation (19)
+
+
+
+class SigmoidBernoulli(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.spike_fn = StochasticStraightThrough.apply
+
+    def forward(self, inputs):
+        spk_prob = torch.sigmoid(inputs) # Equation (17)
+        spk = self.spike_fn(spk_prob)
+        return spk
+
 class S4DKernel(nn.Module):
     """Wrapper around SSKernelDiag that generates the diagonal SSM parameters
     """
@@ -101,6 +125,8 @@ class S4DSpike(nn.Module):
         )
         self.spike_grad = surrogate.fast_sigmoid(slope=25)
 
+        self.bernoulli_spike = SigmoidBernoulli(self.D.device)
+
     def forward(self, u, **kwargs): # absorbs return_output and transformer src mask
         """ Input and output shape (B, H, L) """
         if not self.transposed: u = u.transpose(-1, -2)
@@ -119,7 +145,8 @@ class S4DSpike(nn.Module):
         # Compute D term in state space equation - essentially a skip connection
         y = y + u * self.D.unsqueeze(-1)
 
-        y = self.dropout(self.spike_grad(y))
+        #y = self.dropout(self.spike_grad(y))
+        y = self.dropout(self.bernoulli_spike(y))
         y = self.output_linear(y)
 
         if not self.transposed: y = y.transpose(-1, -2)

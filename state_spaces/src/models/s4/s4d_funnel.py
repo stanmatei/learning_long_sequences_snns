@@ -94,17 +94,25 @@ class S4DSpike(nn.Module):
         dropout_fn = DropoutNd
         self.dropout = dropout_fn(dropout) if dropout > 0.0 else nn.Identity()
 
+        stdv = 1. / math.sqrt(self.h)
+
+        self.GSU = nn.Parameter(torch.Tensor(size = (self.h, self.h)).uniform_(-stdv, stdv)).to(self.D.device)
+        self.GSU_bias = nn.Parameter(torch.randn(self.h))
+
+        self.norm = nn.LayerNorm(self.h)
+
         # position-wise output transform to mix features
+        """
         self.output_linear = nn.Sequential(
             nn.Conv1d(self.h, 2*self.h, kernel_size=1),
             nn.GLU(dim=-2),
         )
+        """
         self.spike_grad = surrogate.fast_sigmoid(slope=25)
 
     def forward(self, u, **kwargs): # absorbs return_output and transformer src mask
         """ Input and output shape (B, H, L) """
         if not self.transposed: u = u.transpose(-1, -2)
-
 
         L = u.size(-1)
 
@@ -118,12 +126,32 @@ class S4DSpike(nn.Module):
 
         # Compute D term in state space equation - essentially a skip connection
         y = y + u * self.D.unsqueeze(-1)
+
+        y = y.transpose(-1, -2)
+
+        #y_spike = self.spike_grad(y)    
+        y_delta = 0.15 * torch.max(torch.abs(y), dim = 2)[0].unsqueeze(-1)
+
+        y_spike = self.spike_grad(y - y_delta) - self.spike_grad(-y - y_delta)
         
-        y = self.quantise(y)
-        y = torch.minimum(torch.maximum(y, torch.zeros_like(y)), torch.ones_like(y) * 0.1)
+        y_spike = (y_spike @ self.GSU + self.GSU_bias)
+
+        #gsu_spike = self.spike_grad(self.GSU)
+
+        delta = 0.15 * torch.max(torch.abs(self.GSU))
+
+        gsu_spike = self.spike_grad(self.GSU - delta) - self.spike_grad(-self.GSU - delta)
+
+        y_gate = (y @ gsu_spike)
+
+        y = y_spike * y_gate
+
+        y = self.norm(y)
+
+        y = y.transpose(-1, -2)
 
         y = self.dropout(y)
-        y = self.output_linear(y)
+        #y = self.output_linear(y)
         #y = self.spike_grad(y)
         if not self.transposed: y = y.transpose(-1, -2)
         return y, None # Return a dummy state to satisfy this repo's interface, but this can be modified

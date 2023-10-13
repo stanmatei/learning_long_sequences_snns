@@ -12,6 +12,13 @@ from pytorch_lightning.utilities import rank_zero_only
 from einops import rearrange, repeat
 import opt_einsum as oe
 
+import snntorch as snn
+from snntorch import surrogate
+from snntorch import backprop
+from snntorch import functional as SF
+from snntorch import utils
+from snntorch import spikeplot as splt
+
 contract = oe.contract
 contract_expression = oe.contract_expression
 
@@ -1354,7 +1361,7 @@ class SSKernel(nn.Module):
     def default_state(self, *args, **kwargs):
         return self.kernel.default_state(*args, **kwargs)
 
-class S4Spike(nn.Module):
+class S4(nn.Module):
     def __init__(
             self,
             d_model,
@@ -1460,6 +1467,7 @@ class S4Spike(nn.Module):
         dropout_fn = DropoutNd if tie_dropout else nn.Dropout
         self.dropout = dropout_fn(dropout) if dropout > 0.0 else nn.Identity()
         # position-wise output transform to mix features
+
         self.output_linear = LinearActivation(
             self.H*self.channels,
             self.d_model*(1 if self.gate is None else self.gate),
@@ -1467,6 +1475,8 @@ class S4Spike(nn.Module):
             activation=postact,
             activate=True,
         )
+
+        self.spike_grad = surrogate.fast_sigmoid(slope=25)
 
     def forward(self, u, state=None, rate=1.0, lengths=None, **kwargs):
         """
@@ -1529,14 +1539,34 @@ class S4Spike(nn.Module):
         # Reshape to flatten channels
         y = rearrange(y, '... c h l -> ... (c h) l')
 
-        y = self.dropout(self.activation(y))
+        #y = self.dropout(self.activation(y))
+
+        y = y.transpose(-1, -2)
+
+        #y_spike = self.spike_grad(y)    
+        y_delta = 0.15 * torch.max(torch.abs(y), dim = 2)[0].unsqueeze(-1)
+
+        y_spike = self.spike_grad(y - y_delta) - self.spike_grad(-y - y_delta)
+        
+        y_spike = (y_spike @ self.GSU + self.GSU_bias)
+
+        #gsu_spike = self.spike_grad(self.GSU)
+
+        delta = 0.15 * torch.max(torch.abs(self.GSU))
+
+        gsu_spike = self.spike_grad(self.GSU - delta) - self.spike_grad(-self.GSU - delta)
+
+        y_gate = (y @ gsu_spike)
+
+        y = y_spike * y_gate
+
+        y = self.norm(y)
+
+        y = y.transpose(-1, -2)
+
+        y = self.dropout(y)
 
         if not self.transposed: y = y.transpose(-1, -2)
-
-        y = self.output_linear(y)
-
-        if self.gate is not None:
-            y = self.output_gate(y * v)
 
         return y, next_state
 
