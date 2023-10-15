@@ -1,6 +1,6 @@
 # Config for the standalone s4.py module for testing purposes
 # Should be equivalent to the normal s4.yaml layer
-_name_: standalone
+_name_: s4_gsu
 d_state: 64
 channels: 1
 bidirectional: false

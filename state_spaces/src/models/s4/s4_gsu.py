@@ -1430,29 +1430,6 @@ class S4(nn.Module):
                 activate=True,
             )
 
-        if gate is not None:
-            self.input_gate = LinearActivation(
-                self.d_model,
-                self.d_model * gate,
-                transposed=self.transposed,
-                activation=activation,
-                activate=True,
-            )
-            self.output_gate = LinearActivation(
-                self.d_model * gate,
-                self.d_model,
-                transposed=self.transposed,
-                activation=None,
-                activate=False,
-            )
-
-        # optional multiplicative modulation GLU-style
-        # https://arxiv.org/abs/2002.05202
-        self.hyper = hyper_act is not None
-        if self.hyper:
-            channels *= 2
-            self.hyper_activation = Activation(hyper_act)
-
         self.D = nn.Parameter(torch.randn(channels, self.H))
 
         if self.bidirectional:
@@ -1468,13 +1445,12 @@ class S4(nn.Module):
         self.dropout = dropout_fn(dropout) if dropout > 0.0 else nn.Identity()
         # position-wise output transform to mix features
 
-        self.output_linear = LinearActivation(
-            self.H*self.channels,
-            self.d_model*(1 if self.gate is None else self.gate),
-            transposed=self.transposed,
-            activation=postact,
-            activate=True,
-        )
+        stdv = 1. / math.sqrt(self.d_model)
+
+        self.GSU = nn.Parameter(torch.Tensor(size = (self.d_model, self.d_model)).uniform_(-stdv, stdv)).to(self.D.device)
+        self.GSU_bias = nn.Parameter(torch.randn(self.d_model))
+
+        self.norm = nn.LayerNorm(self.d_model)
 
         self.spike_grad = surrogate.fast_sigmoid(slope=25)
 
@@ -1499,11 +1475,6 @@ class S4(nn.Module):
             mask = torch.where(torch.arange(L, device=lengths.device) < lengths[:, None, None], 1., 0.)
             u = u * mask
 
-        if self.gate is not None:
-            v = self.input_gate(u)
-        if self.bottleneck is not None:
-            u = self.input_linear(u)
-
         # Compute SS Kernel
         L_kernel = L if self.L is None else min(L, round(self.L / rate))
         k, k_state = self.kernel(L=L_kernel, rate=rate, state=state) # (C H L) (B C H L)
@@ -1523,39 +1494,19 @@ class S4(nn.Module):
         # Compute D term in state space equation - essentially a skip connection
         y = y + contract('bhl,ch->bchl', u, self.D)
 
-        # Compute state update
-        if state is not None:
-            assert not self.bidirectional, "Bidirectional not supported with state forwarding"
-            y = y + k_state #
-            next_state = self.kernel.forward_state(u, state)
-        else:
-            next_state = None
-
-        # Optional hyper-network multiplication
-        if self.hyper:
-            y, yh = rearrange(y, 'b (s c) h l -> s b c h l', s=2)
-            y = self.hyper_activation(yh) * y
-
         # Reshape to flatten channels
         y = rearrange(y, '... c h l -> ... (c h) l')
 
         #y = self.dropout(self.activation(y))
 
         y = y.transpose(-1, -2)
-
-        #y_spike = self.spike_grad(y)    
+  
         y_delta = 0.15 * torch.max(torch.abs(y), dim = 2)[0].unsqueeze(-1)
-
         y_spike = self.spike_grad(y - y_delta) - self.spike_grad(-y - y_delta)
-        
         y_spike = (y_spike @ self.GSU + self.GSU_bias)
 
-        #gsu_spike = self.spike_grad(self.GSU)
-
         delta = 0.15 * torch.max(torch.abs(self.GSU))
-
         gsu_spike = self.spike_grad(self.GSU - delta) - self.spike_grad(-self.GSU - delta)
-
         y_gate = (y @ gsu_spike)
 
         y = y_spike * y_gate
@@ -1564,11 +1515,13 @@ class S4(nn.Module):
 
         y = y.transpose(-1, -2)
 
+        y = self.activation(y)
+
         y = self.dropout(y)
 
         if not self.transposed: y = y.transpose(-1, -2)
 
-        return y, next_state
+        return y, None
 
     def setup_step(self, **kwargs):
         self.kernel._setup_step(**kwargs)
@@ -1585,6 +1538,7 @@ class S4(nn.Module):
         y, next_state = self.kernel.step(u, state) # (B C H)
         y = y + u.unsqueeze(-2) * self.D
         y = rearrange(y, 'b c h -> b (c h)')
+
         y = self.activation(y)
         if self.transposed:
             y = self.output_linear(y.unsqueeze(-1)).squeeze(-1)

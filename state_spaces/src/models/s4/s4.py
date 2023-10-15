@@ -1354,7 +1354,7 @@ class SSKernel(nn.Module):
     def default_state(self, *args, **kwargs):
         return self.kernel.default_state(*args, **kwargs)
 
-class S4Spike(nn.Module):
+class S4(nn.Module):
     def __init__(
             self,
             d_model,

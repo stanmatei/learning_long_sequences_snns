@@ -38,5 +38,5 @@ trainer:
   max_epochs: 200
 
 train:
-  seed: 2222
+  seed: 13
   interval: step

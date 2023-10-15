@@ -54,6 +54,8 @@ layer = {
     "s4d": "src.models.s4.s4d.S4D",
     "s4dspike":"src.models.s4.local_pooling_ssm.LocalPoolingSSM",
     "s4dfunnel":"src.models.s4.s4d_funnel.S4DSpike",
+    "s4_gsu":"src.models.s4.s4_gsu.S4",
+    "s4_surrogate": "src.models.s4.s4_surrogate.S4",
     "s4dsurrogate":"src.models.s4.s4d_surrogate.S4DSpike",
     "ff": "src.models.sequence.ff.FF",
     "rnn": "src.models.sequence.rnns.rnn.RNN",

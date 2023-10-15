@@ -11,8 +11,8 @@ gate: null # 4 for GSS
 bottleneck: null # 4 for GSS
 # dropout: ${model.dropout} # Same as null
 tie_dropout: ${oc.select:model.tie_dropout,null}
-mode: nplr
-measure: legs
+mode: diag
+measure: diag-inv
 rank: 1
 dt_min: 0.001
 dt_max: 0.1

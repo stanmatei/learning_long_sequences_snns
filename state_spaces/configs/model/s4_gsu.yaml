@@ -1,0 +1,6 @@
+defaults:
+  - base
+  - override layer: s4_gsu
+
+transposed: false # Actually faster than "true"
+tie_dropout: true
